@@ -1,0 +1,5 @@
+build/
+*.pro.user
+sdkconfig
+sdkconfig.*
+compile_commands.json
