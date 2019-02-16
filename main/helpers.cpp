@@ -4,6 +4,8 @@
 
 #include <chrono>
 
+static const char* TAG = "esp32_sensor_node/helpers";
+
 bool macStrToBinary(const char* macStr, uint8_t outArray[MWIFI_ADDR_LEN])
 {
     uint32_t macData[MWIFI_ADDR_LEN];
@@ -25,6 +27,15 @@ bool macStrToBinary(const char* macStr, uint8_t outArray[MWIFI_ADDR_LEN])
     }
 
     return true;
+}
+
+std::string macBinaryToStr(uint8_t addr[MWIFI_ADDR_LEN])
+{
+    char* data = nullptr;
+    asprintf(&data, MACSTR, MAC2STR(addr));
+    std::string result(data);
+    MDF_FREE(data);
+    return result;
 }
 
 long long millis()

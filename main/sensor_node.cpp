@@ -1,6 +1,7 @@
 #include "sensor_node.h"
 
 #include "globals.h"
+#include "helpers.h"
 #include "mqtt.h"
 #include "process_sensors.h"
 
@@ -37,11 +38,11 @@ void rootWriteWorker(void*)
         }
         data[size] = 0;
 
-        std::string jsonData = R"({"addr":")" MACSTR R"(","data":)";
+        std::string jsonData = R"({"addr":")" + macBinaryToStr(srcAddr) + R"(","data":)";
         jsonData += data;
         jsonData += "}";
 
-        MDF_LOGI("TCP write, size: %u, data: %s", jsonData.size(), jsonData.c_str());
+        MDF_LOGI("Message pushed to queue, size: %u, data: %s", jsonData.size(), jsonData.c_str());
         // TODO: parse data and detect type
         mqttPushMessage("sensor_data/temperature", jsonData);
 

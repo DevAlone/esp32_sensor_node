@@ -19,10 +19,12 @@ static esp_mqtt_client_handle_t client = nullptr;
 static bool isClientReady = false;
 static std::queue<std::pair<std::string, std::string>> messagesQueue;
 
+static const char* mqttURI = "mqtt://" CONFIG_MQTT_USERNAME ":" CONFIG_MQTT_PASSWORD "@" CONFIG_MQTT_IP ":" CONFIG_MQTT_PORT;
+
 void mqttInit()
 {
     esp_mqtt_client_config_t mqttConfig = {};
-    mqttConfig.uri = "mqtt://" CONFIG_MQTT_USERNAME ":" CONFIG_MQTT_PASSWORD "@" CONFIG_MQTT_IP ":" CONFIG_MQTT_PORT;
+    mqttConfig.uri = mqttURI;
     // mqttConfig.uri = "mqtts://api.emitter.io:443";
     // mqttConfig.uri = "mqtt://api.emitter.io:8080";
     mqttConfig.event_handle = mqttEventHandler;
@@ -112,7 +114,9 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
         break;
     case MQTT_EVENT_SUBSCRIBED: {
         ESP_LOGI(LOG_TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        int msgId = esp_mqtt_client_publish(
+        // TODO: remove
+        /*
+         * int msgId = esp_mqtt_client_publish(
             client,
             CONFIG_MQTT_TOPIC_PREFIX "/",
             "event subscribed",
@@ -120,6 +124,7 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
             0,
             0);
         ESP_LOGI(LOG_TAG, "sent publish successful, msg_id=%d", msgId);
+            */
     } break;
     case MQTT_EVENT_UNSUBSCRIBED:
         ESP_LOGI(LOG_TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -135,7 +140,7 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
         ESP_LOGI(LOG_TAG, "MQTT_EVENT_ERROR");
         break;
     case MQTT_EVENT_BEFORE_CONNECT:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_BEFORE_CONNECT");
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_BEFORE_CONNECT. Trying to connect to address %s", mqttURI);
         break;
     }
 
@@ -158,7 +163,7 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
 
         int msgId = esp_mqtt_client_publish(
             client,
-            (std::string(CONFIG_MQTT_TOPIC_PREFIX) + item.first).c_str(),
+            (std::string(CONFIG_MQTT_TOPIC_PREFIX) + "/" + item.first).c_str(),
             item.second.c_str(),
             0,
             0,
