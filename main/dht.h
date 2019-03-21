@@ -17,6 +17,7 @@ namespace dht {
         NOT_ENOUGH_PULSES = 3,
         UNABLE_TO_INITIALIZE_RINGBUFFER = 4,
         UNABLE_TO_READ_RINGBUFFER = 5,
+        TIMEOUT_ERROR = 6,
     };
 
     class DHTData {
@@ -47,6 +48,12 @@ namespace dht {
 
         const gpio_num_t pin;
         const size_t numberOfAttempts = 3;
+        const int64_t maximumReadPeriodMs = 2500;
+
+    private:
+        int64_t lastReadTimeMs = 0;
+        DHTData lastResult = {};
+        DHTReadStatus lastStatus = DHTReadStatus::BAD_ARGUMENT;
     };
 
     // Reads data from sensor attached to pin

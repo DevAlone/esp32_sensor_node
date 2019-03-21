@@ -10,10 +10,6 @@ using namespace sensors;
 #endif
 #include "mdf_common.h"
 
-#if (CONFIG_SENSOR_DHT11_ENABLED == true)
-static dht::DHT dht11Sensor(gpio_num_t(CONFIG_SENSOR_DHT11_PIN));
-#endif
-
 static const char* LOG_TAG = "process_sensors";
 
 namespace std {
@@ -56,6 +52,8 @@ std::string getSensorsDataJSON()
     std::string result = "[";
 
 #if (CONFIG_SENSOR_DHT11_ENABLED == true)
+    static dht::DHT dht11Sensor(gpio_num_t(CONFIG_SENSOR_DHT11_PIN));
+
     dht::DHTData dht11Data;
     auto readStatus = dht11Sensor.read(&dht11Data);
     if (readStatus == dht::DHTReadStatus::OK) {

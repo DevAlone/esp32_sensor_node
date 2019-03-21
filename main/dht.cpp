@@ -4,8 +4,11 @@
 #include <chrono>
 #include <ctime>
 #include <driver/rmt.h>
+#include <esp_log.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/portmacro.h>
 #include <freertos/task.h>
 #include <soc/rmt_reg.h>
 
@@ -41,19 +44,117 @@ namespace dht {
         if (outResult == nullptr) {
             return DHTReadStatus::BAD_ARGUMENT;
         }
+
+        if (lastStatus != DHTReadStatus::OK) {
+            vTaskDelay(3000 / portTICK_RATE_MS);
+        } else {
+            auto currentMillis = esp_timer_get_time() / 1000;
+            if (lastReadTimeMs != 0 && lastReadTimeMs + maximumReadPeriodMs >= currentMillis) {
+                // return cached value
+                outResult->rawHumidity = lastResult.rawHumidity;
+                outResult->rawTemperature = lastResult.rawTemperature;
+                return DHTReadStatus::OK;
+            }
+        }
+
         DHTReadStatus status = DHTReadStatus::BAD_ARGUMENT;
         for (size_t i = 0; i < numberOfAttempts; ++i) {
             status = dht::read(pin, outResult);
+            lastStatus = status;
             if (status == DHTReadStatus::OK) {
+                // set value to cache
+                lastResult.rawHumidity = outResult->rawHumidity;
+                lastResult.rawTemperature = outResult->rawTemperature;
+                lastReadTimeMs = esp_timer_get_time() / 1000;
                 return status;
             }
-            vTaskDelay(50 / portTICK_RATE_MS);
+            vTaskDelay(150 / portTICK_RATE_MS);
         }
+
         return status;
+    }
+
+    void _sendStartSignal(gpio_num_t pin)
+    {
+        gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(pin, 0);
+        ets_delay_us(20 * 1000);
+        gpio_set_level(pin, 1);
+        ets_delay_us(40);
+        gpio_set_direction(pin, GPIO_MODE_INPUT);
+    }
+
+    static int _waitOrTimeout(gpio_num_t pin, uint16_t microSeconds, int level)
+    {
+        int micros_ticks = 0;
+        while (gpio_get_level(pin) == level) {
+            if (micros_ticks++ > microSeconds)
+                return -1;
+            ets_delay_us(1);
+        }
+        return micros_ticks;
+    }
+
+    static DHTReadStatus _checkResponse(gpio_num_t pin)
+    {
+        /* Wait for next step ~80us*/
+        if (_waitOrTimeout(pin, 80, 0) < 0)
+            return DHTReadStatus::TIMEOUT_ERROR;
+
+        /* Wait for next step ~80us*/
+        if (_waitOrTimeout(pin, 80, 1) < 0)
+            return DHTReadStatus::TIMEOUT_ERROR;
+
+        return DHTReadStatus::OK;
+    }
+
+    static bool _checkCRC(uint8_t data[])
+    {
+        if (data[4] == (data[0] + data[1] + data[2] + data[3]))
+            return true;
+        else
+            return false;
     }
 
     DHTReadStatus read(gpio_num_t pin, DHTData* outResult)
     {
+        /*
+        uint8_t data[5] = { 0, 0, 0, 0, 0 };
+
+        _sendStartSignal(pin);
+
+        if (_checkResponse(pin) == DHTReadStatus::TIMEOUT_ERROR)
+            return DHTReadStatus::TIMEOUT_ERROR;
+
+        // Read response
+        for (int i = 0; i < 40; i++) {
+            // Initial data
+            if (_waitOrTimeout(pin, 50, 0) < 0) {
+                return DHTReadStatus::TIMEOUT_ERROR;
+            }
+
+            if (_waitOrTimeout(pin, 70, 1) > 28) {
+                // Bit received was a 1
+                data[i / 8] |= (1 << (7 - (i % 8)));
+            }
+        }
+
+        if (_checkCRC(data)) {
+            outResult->rawHumidity = data[0];
+            outResult->rawTemperature = data[2];
+
+            return DHTReadStatus::OK;
+        }
+
+        return DHTReadStatus::WRONG_CHECKSUM;
+*/
+        ESP_LOGI("dht", "entering critical section");
+        portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+        portENTER_CRITICAL(&mux);
+        ESP_LOGI("dht", "inside critical section");
+        portEXIT_CRITICAL(&mux);
+        ESP_LOGI("dht", "exiting critical section");
+
         if (!outResult) {
             return DHTReadStatus::BAD_ARGUMENT;
         }
@@ -63,6 +164,7 @@ namespace dht {
         dht11_rmt_rx_init(pin, rmt_channel);
 
         auto status = dht11_rmt_rx(pin, rmt_channel, &outResult->rawHumidity, &outResult->rawTemperature);
+
         rmt_driver_uninstall(rmt_channel);
 
         return status;
@@ -182,6 +284,5 @@ namespace dht {
 
         return status;
     }
-
 }
 }
