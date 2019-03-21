@@ -2,9 +2,9 @@
 
 void rootWriteWorker(void*);
 
-void nodeReadWorker(void*);
+void meshNodeReadWorker(void*);
 
-void nodeWriteWorker(void*);
+void meshNodeWriteWorker(void*);
 
 /**
  * @brief Timed printing system information

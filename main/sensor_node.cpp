@@ -1,8 +1,9 @@
 #include "sensor_node.h"
 
-#include "MQTTClient.h"
+#include "Defer.h"
 #include "globals.h"
 #include "helpers.h"
+#include "http.h"
 #include "process_sensors.h"
 
 #include "mdf_common.h"
@@ -10,17 +11,54 @@
 #include <string>
 
 static const char* TAG = "esp32_sensor_node";
+const std::string quoteSymbol = "\"";
+
+bool sendSensorsData(uint8_t srcAddr[MWIFI_ADDR_LEN], const char* sensorsData)
+{
+    std::string jsonData = std::string("{")
+        + quoteSymbol + "username" + quoteSymbol + ": " + quoteSymbol + CONFIG_SERVER_USERNAME + quoteSymbol + ","
+        + quoteSymbol + "password" + quoteSymbol + ": " + quoteSymbol + CONFIG_SERVER_PASSWORD + quoteSymbol + ","
+        + quoteSymbol + "node_mac_address" + quoteSymbol + ": " + quoteSymbol + macBinaryToStr(srcAddr) + quoteSymbol + ","
+        + quoteSymbol + "sensors_data" + quoteSymbol + ": " + sensorsData
+        + "}";
+
+    ESP_LOGI(TAG, "sending json data: \"%s\"", jsonData.c_str());
+
+    auto status = sendHttpPost("http://" CONFIG_SERVER_DOMAIN "/api/v1/push_sensors_data", jsonData);
+
+    if (CONFIG_ALTERNATIVE_SERVER_ENABLED) {
+        jsonData = std::string("{")
+            + quoteSymbol + "username" + quoteSymbol + ": " + quoteSymbol + CONFIG_ALTERNATIVE_SERVER_USERNAME + quoteSymbol + ","
+            + quoteSymbol + "password" + quoteSymbol + ": " + quoteSymbol + CONFIG_ALTERNATIVE_SERVER_PASSWORD + quoteSymbol + ","
+            + quoteSymbol + "node_mac_address" + quoteSymbol + ": " + quoteSymbol + macBinaryToStr(srcAddr) + quoteSymbol + ","
+            + quoteSymbol + "sensors_data" + quoteSymbol + ": " + sensorsData
+            + "}";
+
+        ESP_LOGI(TAG, "sending json data: \"%s\"", jsonData.c_str());
+        auto s = sendHttpPost("http://" CONFIG_ALTERNATIVE_SERVER_DOMAIN "/api/v1/push_sensors_data", jsonData);
+        if (s == 200) {
+            status = 200;
+        }
+    }
+
+    return status == 200;
+}
 
 void rootWriteWorker(void*)
 {
-    ESP_LOGI(TAG, "rootWriteWorker!");
+    MDF_LOGI("root write worker is running");
 
 #if CONFIG_USE_MESH == true
     ESP_LOGI(TAG, "rootWriteWorker:mesh");
-    MDF_LOGI("root write worker is running");
     char* data = static_cast<char*>(MDF_CALLOC(1, MWIFI_PAYLOAD_LEN));
 
-    while (mwifi_is_connected()) {
+    while (true) {
+        if (!mwifi_is_connected()) {
+            // wait
+            vTaskDelay(1000 / portTICK_RATE_MS);
+            continue;
+        }
+
         size_t size = MWIFI_PAYLOAD_LEN;
         uint8_t srcAddr[MWIFI_ADDR_LEN] = {};
         mwifi_data_type_t dataType = {};
@@ -42,28 +80,19 @@ void rootWriteWorker(void*)
         }
         data[size] = 0;
 
-        std::string jsonData = R"({"addr":")" + macBinaryToStr(srcAddr) + R"(","data":)";
-        jsonData += data;
-        jsonData += "}";
+        if (sendSensorsData(srcAddr, data)) {
+            // sent succesfull
+            std::string pingMessage = R"({"type":"ping"})";
 
-        // TODO: parse data and detect type
-        for (const auto& client : MQTTClient::mqttClients) {
-            client->mqttPushMessage("sensor_data/temperature", jsonData);
+            returnCode = mwifi_write(
+                srcAddr,
+                &dataType,
+                pingMessage.c_str(),
+                pingMessage.size(),
+                false);
+        } else {
+            // error
         }
-
-        if (MQTTClient::mqttClients.size() == 0) {
-            MDF_LOGE("mqttClients is empty");
-        }
-
-        // TODO: fix
-        std::string pingMessage = R"({"type":"ping"})";
-
-        returnCode = mwifi_write(
-            srcAddr,
-            &dataType,
-            pingMessage.c_str(),
-            pingMessage.size(),
-            false);
 
         MDF_ERROR_CONTINUE(returnCode != MDF_OK, "<%s> mwifi_write", mdf_err_to_name(returnCode));
     }
@@ -71,56 +100,75 @@ void rootWriteWorker(void*)
     MDF_LOGI("root write worker is exiting");
 
     MDF_FREE(data);
-    vTaskDelete(nullptr);
 #else
     ESP_LOGI(TAG, "rootWriteWorker:star");
 
-    size_t packetNumber = 0;
-
     while (true) {
-        onBoardLed.blink(100);
+        vTaskDelay(10 / portTICK_RATE_MS);
 
-        ++packetNumber;
-        ESP_LOGI(TAG, "rootWriteWorker:loop");
         uint8_t srcAddr[MWIFI_ADDR_LEN] = {};
 
         esp_wifi_get_mac(ESP_IF_WIFI_STA, srcAddr);
 
-        std::string jsonData = R"({"addr":")" + macBinaryToStr(srcAddr) + R"(","data":)";
-        jsonData += R"({"packet_number": )"
-            + std::to_string(packetNumber)
-            + R"(, "type": "sensors_data",)"
-            + R"("data": )"
-            + getSensorsDataJSON()
-            + "}";
-        jsonData += "}";
-
-        // TODO: parse data and detect type for routing key
-        for (const auto& client : MQTTClient::mqttClients) {
-            client->mqttPushMessage("sensors_data", jsonData);
+        if (sendSensorsData(srcAddr, getSensorsDataJSON().c_str())) {
+            // sent succesfull
+        } else {
+            // error
         }
 
-        if (MQTTClient::mqttClients.size() == 0) {
-            ESP_LOGI(TAG, "mqttClients is empty");
-        }
-
-        ESP_LOGI(TAG, "rootWriteWorker:before delay");
-        vTaskDelay(2000 / portTICK_RATE_MS);
-        ESP_LOGI(TAG, "rootWriteWorker:after delay");
+        vTaskDelay(3000 / portTICK_RATE_MS);
     }
-    ESP_LOGI(TAG, "rootWriteWorker:after loop");
 #endif
+
+    // cleanup this task
+    vTaskDelete(nullptr);
 }
 
-void nodeReadWorker(void*)
+void meshNodeWriteWorker(void*)
+{
+    mdf_err_t ret = MDF_OK;
+    mwifi_data_type_t data_type = {};
+
+    MDF_LOGI("NODE task is running");
+
+    while (true) {
+        if (!mwifi_is_connected()) {
+            vTaskDelay(1000 / portTICK_RATE_MS);
+            continue;
+        }
+
+        auto sensorsData = getSensorsDataJSON();
+
+        MDF_LOGD(
+            "Node send, size: %d, data: %s",
+            sensorsData.size(),
+            sensorsData.c_str());
+        ret = mwifi_write(
+            nullptr,
+            &data_type,
+            sensorsData.c_str(),
+            sensorsData.size(),
+            true);
+
+        MDF_ERROR_CONTINUE(ret != MDF_OK, "<%s> mwifi_write", mdf_err_to_name(ret));
+
+        vTaskDelay(3000 / portTICK_RATE_MS);
+    }
+
+    MDF_LOGW("NODE task is exit");
+
+    vTaskDelete(nullptr);
+}
+
+void meshNodeReadWorker(void*)
 {
     char* data = static_cast<char*>(MDF_MALLOC(MWIFI_PAYLOAD_LEN));
 
-    MDF_LOGI("Note read task is running");
+    MDF_LOGI("Mesh node read task is running");
 
-    for (;;) {
+    while (true) {
         if (!mwifi_is_connected()) {
-            vTaskDelay(500 / portTICK_RATE_MS);
+            vTaskDelay(1000 / portTICK_RATE_MS);
             continue;
         }
 
@@ -149,60 +197,15 @@ void nodeReadWorker(void*)
             continue;
         }
         if (strcmp(packetType->valuestring, "ping") == 0) {
-            onBoardLed.blink(100);
+            onBoardLed.blink(300);
         }
 
         cJSON_Delete(pJson);
     }
 
-    MDF_LOGW("Note read task is exit");
+    MDF_LOGW("Note read task is exiting");
 
     MDF_FREE(data);
-    vTaskDelete(nullptr);
-}
-
-void nodeWriteWorker(void*)
-{
-    mdf_err_t ret = MDF_OK;
-    int count = 0;
-    char* data = nullptr;
-    mwifi_data_type_t data_type = {};
-
-    MDF_LOGI("NODE task is running");
-
-    for (;;) {
-        if (!mwifi_is_connected()) {
-            vTaskDelay(500 / portTICK_RATE_MS);
-            continue;
-        }
-
-        /*
-        size = asprintf(
-            &data,
-            R"({"seq":%d,"layer":%d,"status":%d})",
-            count++,
-            esp_mesh_get_layer(),
-            gpio_get_level(CONFIG_LED_GPIO_NUM));
-            */
-        auto sensorsData = getSensorsDataJSON();
-
-        size_t size = size_t(asprintf(
-            &data,
-            R"({"packet_number": %d, "type": "sensors_data", "data": %s})",
-            count++,
-            sensorsData.c_str()));
-
-        MDF_LOGD("Node send, size: %d, data: %s", size, data);
-        ret = mwifi_write(nullptr, &data_type, data, size_t(size), true);
-
-        MDF_FREE(data);
-        MDF_ERROR_CONTINUE(ret != MDF_OK, "<%s> mwifi_write", mdf_err_to_name(ret));
-
-        vTaskDelay(2000 / portTICK_RATE_MS);
-    }
-
-    MDF_LOGW("NODE task is exit");
-
     vTaskDelete(nullptr);
 }
 
@@ -221,8 +224,7 @@ void printSystemInfo(void*)
     esp_wifi_vnd_mesh_get(&mesh_assoc);
     esp_mesh_get_parent_bssid(&parent_bssid);
 
-    MDF_LOGI("System information, channel: %d, layer: %d, self mac: " MACSTR ", parent bssid: " MACSTR
-             ", parent rssi: %d, node num: %d, free heap: %u",
+    ESP_LOGI(TAG, "System information, channel: %d, layer: %d, self mac: " MACSTR ", parent bssid: " MACSTR ", parent rssi: %d, node num: %d, free heap: %u",
         primary,
         esp_mesh_get_layer(), MAC2STR(sta_mac), MAC2STR(parent_bssid.addr),
         mesh_assoc.rssi, esp_mesh_get_total_node_num(), esp_get_free_heap_size());
@@ -232,7 +234,8 @@ void printSystemInfo(void*)
     }
 
     uint32_t freeMemoryBytes = esp_get_free_heap_size();
-    MDF_LOGI(
+    ESP_LOGI(
+        TAG,
         "Free memory: %ud bytes, %ud kbytes, %ud mbytes",
         freeMemoryBytes,
         freeMemoryBytes / 1024,

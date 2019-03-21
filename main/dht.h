@@ -46,6 +46,7 @@ namespace dht {
         DHTReadStatus read(DHTData* outResult);
 
         const gpio_num_t pin;
+        const size_t numberOfAttempts = 3;
     };
 
     // Reads data from sensor attached to pin

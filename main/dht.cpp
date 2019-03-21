@@ -38,13 +38,18 @@ namespace dht {
 
     DHTReadStatus DHT::read(DHTData* outResult)
     {
-        // TODO: limit number of requests
-
         if (outResult == nullptr) {
             return DHTReadStatus::BAD_ARGUMENT;
         }
-
-        return dht::read(pin, outResult);
+        DHTReadStatus status = DHTReadStatus::BAD_ARGUMENT;
+        for (size_t i = 0; i < numberOfAttempts; ++i) {
+            status = dht::read(pin, outResult);
+            if (status == DHTReadStatus::OK) {
+                return status;
+            }
+            vTaskDelay(50 / portTICK_RATE_MS);
+        }
+        return status;
     }
 
     DHTReadStatus read(gpio_num_t pin, DHTData* outResult)

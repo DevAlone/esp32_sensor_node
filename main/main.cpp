@@ -1,4 +1,3 @@
-#include "MQTTClient.h"
 #include "globals.h"
 #include "process_sensors.h"
 #include "sensor_node.h"
@@ -9,15 +8,11 @@
 // log tag
 static const char* TAG = "esp32_sensor_node";
 
-static MQTTClient* client = nullptr;
-static MQTTClient* alternativeClient = nullptr;
-
 extern "C" {
 void app_main(void);
 }
 
 #if CONFIG_USE_MESH == true
-
 // #define MEMORY_DEBUG
 
 static mdf_err_t wifi_init()
@@ -59,8 +54,6 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void*)
     switch (event) {
     case MDF_EVENT_MWIFI_STARTED:
         MDF_LOGI("MESH is started");
-
-        MDF_LOGI("clients are initialized");
         break;
 
     case MDF_EVENT_MWIFI_PARENT_CONNECTED:
@@ -78,12 +71,6 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void*)
 
     case MDF_EVENT_MWIFI_ROOT_GOT_IP: {
         MDF_LOGI("Root obtains the IP address. It is posted by LwIP stack automatically");
-
-        // initialize mqtt clients
-        client->mqttInit();
-        if (alternativeClient) {
-            alternativeClient->mqttInit();
-        }
 
         static bool rootWriteWorkerStarted = false;
         if (!rootWriteWorkerStarted) {
@@ -108,14 +95,6 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void*)
 
 void app_main()
 {
-    client = new MQTTClient(
-        "mqtt://" CONFIG_MQTT_USERNAME ":" CONFIG_MQTT_PASSWORD "@" CONFIG_MQTT_IP ":" CONFIG_MQTT_PORT);
-
-    if (CONFIG_MQTT_ALTERNATIVE_ENABLED) {
-        alternativeClient = new MQTTClient(
-            "mqtt://" CONFIG_MQTT_ALTERNATIVE_USERNAME ":" CONFIG_MQTT_ALTERNATIVE_PASSWORD "@" CONFIG_MQTT_ALTERNATIVE_IP ":" CONFIG_MQTT_ALTERNATIVE_PORT);
-    }
-
     mwifi_init_config_t cfg = MWIFI_INIT_CONFIG_DEFAULT();
     mwifi_config_t config = {};
     strcpy(config.router_ssid, CONFIG_ROUTER_SSID);
@@ -142,7 +121,7 @@ void app_main()
 
     // Create tasks
     xTaskCreate(
-        nodeWriteWorker,
+        meshNodeWriteWorker,
         "nodeWriteWorker",
         4 * 1024,
         nullptr,
@@ -150,7 +129,7 @@ void app_main()
         nullptr);
 
     xTaskCreate(
-        nodeReadWorker,
+        meshNodeWriteWorker,
         "nodeReadWorker",
         4 * 1024,
         nullptr,
@@ -180,12 +159,6 @@ static esp_err_t wifi_event_handler(void*, system_event_t* event)
         ESP_LOGI(TAG, "SYSTEM_EVENT_STA_GOT_IP");
         isWifiInitialized = true;
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-
-        // initialize mqtt clients
-        client->mqttInit();
-        if (alternativeClient) {
-            alternativeClient->mqttInit();
-        }
 
         static bool rootWriteWorkerStarted = false;
         if (!rootWriteWorkerStarted) {
@@ -235,14 +208,6 @@ static void wifi_init(void)
 
 void app_main()
 {
-    client = new MQTTClient(
-        "mqtt://" CONFIG_MQTT_USERNAME ":" CONFIG_MQTT_PASSWORD "@" CONFIG_MQTT_IP ":" CONFIG_MQTT_PORT);
-
-    if (CONFIG_MQTT_ALTERNATIVE_ENABLED) {
-        alternativeClient = new MQTTClient(
-            "mqtt://" CONFIG_MQTT_ALTERNATIVE_USERNAME ":" CONFIG_MQTT_ALTERNATIVE_PASSWORD "@" CONFIG_MQTT_ALTERNATIVE_IP ":" CONFIG_MQTT_ALTERNATIVE_PORT);
-    }
-
     ESP_LOGI(TAG, "[APP] Startup..");
     ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());

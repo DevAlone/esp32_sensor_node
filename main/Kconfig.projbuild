@@ -13,7 +13,7 @@ config ROUTER_PASSWORD
             Router password.
 
 config USE_MESH
-    bool "enable to use mesh, or disable to use star topology"
+    bool "whether to use mesh or not"
         default false
         help
 	    enable to use mesh, or disable to use star topology
@@ -41,71 +41,47 @@ config LED_GPIO_NUM
         They are not shown here to reduce redundant information.
         @note GPIO34..39 are input mode only.
 
-config MQTT_IP
-    string "Mqtt server IP address"
+config SERVER_DOMAIN
+    string "server domain(ip address and port)"
         default "192.168.0.1"
         help
-            Mqtt server IP address
+            Server IP address
 
-config MQTT_PORT
-    string "Mqtt server port"
-        default "1883"
-        help
-            Mqtt server port
-
-config MQTT_USERNAME
-    string "Username for mqtt"
+config SERVER_USERNAME
+    string "Username for server"
         default "user"
         help
-            Username for mqtt
+            Username for server
 
-config MQTT_PASSWORD
-    string "Password for mqtt"
+config SERVER_PASSWORD
+    string "Password for server"
         default "qwerty"
         help
-            Password for mqtt
+            Password for server
 
-config MQTT_ALTERNATIVE_ENABLED
-    bool "is alternative client enabled"
+config ALTERNATIVE_SERVER_ENABLED
+    bool "send to another server"
         default false
         help
-		    is alternative client enabled
+		is alternative client enabled
 
-config MQTT_ALTERNATIVE_IP
-    string "Mqtt alternative server IP address"
+config ALTERNATIVE_SERVER_DOMAIN
+    string "alternative server domain(ip and port)"
         default "192.168.0.1"
         help
             Mqtt alternative server IP address
 
-config MQTT_ALTERNATIVE_PORT
-    string "Mqtt alternative server port"
-        default "1883"
-        help
-            Mqtt alternative server port
-
-config MQTT_ALTERNATIVE_USERNAME
-    string "Alternative username for mqtt"
+config ALTERNATIVE_SERVER_USERNAME
+    string "username for alternative server"
         default "user"
         help
-            Alternative username for mqtt
+            Alternative username
 
-config MQTT_ALTERNATIVE_PASSWORD
-    string "Alternative password for mqtt"
+config ALTERNATIVE_SERVER_PASSWORD
+    string "password for alternative server"
         default "qwerty"
         help
-            Alternative password for mqtt
-
-config MQTT_TOPIC_PREFIX
-    string "prefix for mqtt topic"
-        default "esp32_sensor_network"
-        help
-            prefix for mqtt topic
-
-config MQTT_MAX_QUEUE_SIZE
-    int "size of queue of messages on root node"
-        default "32"
-        help
-            size of queue of messages on root node
+            Alternative password for
 
 config SENSOR_DHT11_ENABLED
     bool "whether this node has dht11 sensor or not"
