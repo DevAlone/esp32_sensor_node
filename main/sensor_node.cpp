@@ -1,8 +1,8 @@
 #include "sensor_node.h"
 
+#include "MQTTClient.h"
 #include "globals.h"
 #include "helpers.h"
-#include "mqtt.h"
 #include "process_sensors.h"
 
 #include "mdf_common.h"
@@ -13,6 +13,10 @@ static const char* TAG = "esp32_sensor_node";
 
 void rootWriteWorker(void*)
 {
+    ESP_LOGI(TAG, "rootWriteWorker!");
+
+#if CONFIG_USE_MESH == true
+    ESP_LOGI(TAG, "rootWriteWorker:mesh");
     MDF_LOGI("root write worker is running");
     char* data = static_cast<char*>(MDF_CALLOC(1, MWIFI_PAYLOAD_LEN));
 
@@ -42,9 +46,14 @@ void rootWriteWorker(void*)
         jsonData += data;
         jsonData += "}";
 
-        MDF_LOGI("Message pushed to queue, size: %u, data: %s", jsonData.size(), jsonData.c_str());
         // TODO: parse data and detect type
-        mqttPushMessage("sensor_data/temperature", jsonData);
+        for (const auto& client : MQTTClient::mqttClients) {
+            client->mqttPushMessage("sensor_data/temperature", jsonData);
+        }
+
+        if (MQTTClient::mqttClients.size() == 0) {
+            MDF_LOGE("mqttClients is empty");
+        }
 
         // TODO: fix
         std::string pingMessage = R"({"type":"ping"})";
@@ -63,6 +72,44 @@ void rootWriteWorker(void*)
 
     MDF_FREE(data);
     vTaskDelete(nullptr);
+#else
+    ESP_LOGI(TAG, "rootWriteWorker:star");
+
+    size_t packetNumber = 0;
+
+    while (true) {
+        onBoardLed.blink(100);
+
+        ++packetNumber;
+        ESP_LOGI(TAG, "rootWriteWorker:loop");
+        uint8_t srcAddr[MWIFI_ADDR_LEN] = {};
+
+        esp_wifi_get_mac(ESP_IF_WIFI_STA, srcAddr);
+
+        std::string jsonData = R"({"addr":")" + macBinaryToStr(srcAddr) + R"(","data":)";
+        jsonData += R"({"packet_number": )"
+            + std::to_string(packetNumber)
+            + R"(, "type": "sensors_data",)"
+            + R"("data": )"
+            + getSensorsDataJSON()
+            + "}";
+        jsonData += "}";
+
+        // TODO: parse data and detect type for routing key
+        for (const auto& client : MQTTClient::mqttClients) {
+            client->mqttPushMessage("sensors_data", jsonData);
+        }
+
+        if (MQTTClient::mqttClients.size() == 0) {
+            ESP_LOGI(TAG, "mqttClients is empty");
+        }
+
+        ESP_LOGI(TAG, "rootWriteWorker:before delay");
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        ESP_LOGI(TAG, "rootWriteWorker:after delay");
+    }
+    ESP_LOGI(TAG, "rootWriteWorker:after loop");
+#endif
 }
 
 void nodeReadWorker(void*)

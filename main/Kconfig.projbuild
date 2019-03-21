@@ -12,6 +12,12 @@ config ROUTER_PASSWORD
         help
             Router password.
 
+config USE_MESH
+    bool "enable to use mesh, or disable to use star topology"
+        default false
+        help
+	    enable to use mesh, or disable to use star topology
+            
 config MESH_ID
     string "Mesh ID"
         default "123456"
@@ -58,6 +64,36 @@ config MQTT_PASSWORD
         default "qwerty"
         help
             Password for mqtt
+
+config MQTT_ALTERNATIVE_ENABLED
+    bool "is alternative client enabled"
+        default false
+        help
+		    is alternative client enabled
+
+config MQTT_ALTERNATIVE_IP
+    string "Mqtt alternative server IP address"
+        default "192.168.0.1"
+        help
+            Mqtt alternative server IP address
+
+config MQTT_ALTERNATIVE_PORT
+    string "Mqtt alternative server port"
+        default "1883"
+        help
+            Mqtt alternative server port
+
+config MQTT_ALTERNATIVE_USERNAME
+    string "Alternative username for mqtt"
+        default "user"
+        help
+            Alternative username for mqtt
+
+config MQTT_ALTERNATIVE_PASSWORD
+    string "Alternative password for mqtt"
+        default "qwerty"
+        help
+            Alternative password for mqtt
 
 config MQTT_TOPIC_PREFIX
     string "prefix for mqtt topic"

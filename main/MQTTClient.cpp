@@ -1,4 +1,4 @@
-#include "mqtt.h"
+#include "MQTTClient.h"
 
 #include "Defer.h"
 #include "helpers.h"
@@ -15,33 +15,62 @@
 
 static const char* LOG_TAG = "MQTT_LOG";
 
-static esp_mqtt_client_handle_t client = nullptr;
-static bool isClientReady = false;
-static std::queue<std::pair<std::string, std::string>> messagesQueue;
+std::unordered_set<MQTTClient*> MQTTClient::mqttClients;
+std::unordered_map<esp_mqtt_client_handle_t, MQTTClient*> MQTTClient::mqttClientsMap;
 
-static const char* mqttURI = "mqtt://" CONFIG_MQTT_USERNAME ":" CONFIG_MQTT_PASSWORD "@" CONFIG_MQTT_IP ":" CONFIG_MQTT_PORT;
-
-void mqttInit()
+MQTTClient::MQTTClient(const char* mqttURI)
+    : mqttURI(mqttURI)
 {
+    xTaskCreate(
+        mqttStaticWorker,
+        "mqttStaticWorker",
+        4 * 1024,
+        this,
+        CONFIG_MDF_TASK_DEFAULT_PRIOTY,
+        nullptr);
+    mqttClients.insert(this);
+}
+
+MQTTClient::~MQTTClient()
+{
+    if (client) {
+        esp_mqtt_client_stop(client);
+        esp_mqtt_client_destroy(client);
+    }
+
+    mqttClients.erase(this);
+    auto it = mqttClientsMap.find(client);
+    if (it != mqttClientsMap.end()) {
+        mqttClientsMap.erase(it);
+    }
+}
+
+void MQTTClient::mqttInit()
+{
+    if (client) {
+        esp_mqtt_client_stop(client);
+        esp_mqtt_client_destroy(client);
+        client = nullptr;
+    }
+
     esp_mqtt_client_config_t mqttConfig = {};
     mqttConfig.uri = mqttURI;
     // mqttConfig.uri = "mqtts://api.emitter.io:443";
     // mqttConfig.uri = "mqtt://api.emitter.io:8080";
     mqttConfig.event_handle = mqttEventHandler;
     auto c = esp_mqtt_client_init(&mqttConfig);
-    esp_mqtt_client_start(c); // TODO: check error
     client = c;
-    xTaskCreate(
-        mqttWorker,
-        "mqttWorker",
-        4 * 1024,
-        nullptr,
-        CONFIG_MDF_TASK_DEFAULT_PRIOTY,
-        nullptr);
+    mqttClientsMap[client] = this;
+    auto err = esp_mqtt_client_start(c); // TODO: check error
+    if (err != ESP_OK) {
+        ESP_LOGE(LOG_TAG, "mqtt connection error. error: %d", err);
+    }
 }
 
-void processMQTTMessage(esp_mqtt_event_handle_t event)
+void MQTTClient::processMQTTMessage(esp_mqtt_event_handle_t event)
 {
+#if CONFIG_USE_MESH == true
+
     printf("processing mqtt message");
     printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
     printf("DATA=%.*s\r\n", event->data_len, event->data);
@@ -93,15 +122,29 @@ void processMQTTMessage(esp_mqtt_event_handle_t event)
             destAddrJson->valuestring, event->data);
         return;
     }
+#else
+    // TODO: process
+#endif
 }
 
-esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
+esp_err_t MQTTClient::mqttEventHandler(esp_mqtt_event_handle_t event)
 {
     esp_mqtt_client_handle_t client = event->client;
+    MQTTClient* mqttClient = nullptr;
+    {
+        auto it = mqttClientsMap.find(client);
+        if (it != mqttClientsMap.end()) {
+            mqttClient = it->second;
+        }
+    }
+    const char* mqttURI = mqttClient ? mqttClient->mqttURI : "";
+
     switch (event->event_id) {
     case MQTT_EVENT_CONNECTED: {
-        isClientReady = true;
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_CONNECTED");
+        if (mqttClient) {
+            mqttClient->isClientReady = true;
+        }
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_CONNECTED, client: %s", mqttURI);
         int msgId = esp_mqtt_client_subscribe(
             client,
             CONFIG_MQTT_TOPIC_PREFIX "/*",
@@ -109,11 +152,13 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
         ESP_LOGI(LOG_TAG, "sent subscribe successful, msgId = %d", msgId);
     } break;
     case MQTT_EVENT_DISCONNECTED:
-        isClientReady = false;
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_DISCONNECTED");
+        if (mqttClient) {
+            mqttClient->isClientReady = false;
+        }
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_DISCONNECTED, client: %s", mqttURI);
         break;
     case MQTT_EVENT_SUBSCRIBED: {
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d, client: %s", event->msg_id, mqttURI);
         // TODO: remove
         /*
          * int msgId = esp_mqtt_client_publish(
@@ -127,27 +172,44 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
             */
     } break;
     case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d, client: %s", event->msg_id, mqttURI);
         break;
     case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d. client: %s", event->msg_id, mqttURI);
         break;
     case MQTT_EVENT_DATA:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_DATA");
-        processMQTTMessage(event);
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_DATA, client: %s", mqttURI);
+        if (mqttClient) {
+            mqttClient->processMQTTMessage(event);
+        }
         break;
     case MQTT_EVENT_ERROR:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_ERROR");
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_ERROR. client: %s, data: %s", mqttURI, event->data);
         break;
     case MQTT_EVENT_BEFORE_CONNECT:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_BEFORE_CONNECT. Trying to connect to address %s", mqttURI);
+        ESP_LOGI(
+            LOG_TAG,
+            "MQTT_EVENT_BEFORE_CONNECT. Trying to connect to address '%s', client: %lld, mqttClient: %lld",
+            mqttURI,
+            int64_t(client),
+            int64_t(mqttClient));
         break;
     }
 
     return ESP_OK;
 }
 
-[[noreturn]] void mqttWorker(void*)
+void MQTTClient::mqttStaticWorker(void* ptr)
+{
+    if (ptr == nullptr) {
+        ESP_LOGE(LOG_TAG, "mqttStaticWorker():null ptr");
+        return;
+    }
+
+    static_cast<MQTTClient*>(ptr)->mqttWorker();
+}
+
+[[noreturn]] void MQTTClient::mqttWorker()
 {
     while (true) {
         if (client == nullptr || !isClientReady) {
@@ -169,7 +231,7 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
             0,
             0);
 
-        ESP_LOGI(LOG_TAG, "sent publish successful, msg_id=%d", msgId);
+        ESP_LOGI(LOG_TAG, "sent publish successful, msg_id=%d, client: %s", msgId, mqttURI);
 
         vTaskDelay(1000 / portTICK_RATE_MS);
     }
@@ -177,10 +239,12 @@ esp_err_t mqttEventHandler(esp_mqtt_event_handle_t event)
     vTaskDelete(nullptr);
 }
 
-void mqttPushMessage(const std::string& routingKey, const std::string& jsonMessage)
+void MQTTClient::mqttPushMessage(const std::string& routingKey, const std::string& jsonMessage)
 {
     while (messagesQueue.size() >= size_t(CONFIG_MQTT_MAX_QUEUE_SIZE)) {
         vTaskDelay(100 / portTICK_RATE_MS);
     }
     messagesQueue.push(std::make_pair(routingKey, jsonMessage));
+
+    ESP_LOGI(LOG_TAG, "Message pushed to queue, size: %u, data: %s, client: %s", jsonMessage.size(), jsonMessage.c_str(), mqttURI);
 }

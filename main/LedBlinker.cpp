@@ -1,10 +1,15 @@
 #include "LedBlinker.h"
 
+#include "esp_log.h"
+
 #include <chrono>
 
 LedBlinker::LedBlinker(const gpio_num_t pin)
     : pin(pin)
 {
+    gpio_pad_select_gpio(pin);
+    gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT);
+
     xTaskCreate(
         LedBlinker::task,
         "LedBlinker::task",
