@@ -112,8 +112,10 @@ void rootWriteWorker(void*)
 
         if (sendSensorsData(srcAddr, getSensorsDataJSON().c_str())) {
             // sent succesfull
+            onBoardLed.blink(250);
         } else {
             // error
+            onBoardLed.blink(1000);
         }
 
         vTaskDelay(3000 / portTICK_RATE_MS);
@@ -197,7 +199,7 @@ void meshNodeReadWorker(void*)
             continue;
         }
         if (strcmp(packetType->valuestring, "ping") == 0) {
-            onBoardLed.blink(300);
+            onBoardLed.blink(250);
         }
 
         cJSON_Delete(pJson);

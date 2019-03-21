@@ -118,43 +118,6 @@ namespace dht {
 
     DHTReadStatus read(gpio_num_t pin, DHTData* outResult)
     {
-        /*
-        uint8_t data[5] = { 0, 0, 0, 0, 0 };
-
-        _sendStartSignal(pin);
-
-        if (_checkResponse(pin) == DHTReadStatus::TIMEOUT_ERROR)
-            return DHTReadStatus::TIMEOUT_ERROR;
-
-        // Read response
-        for (int i = 0; i < 40; i++) {
-            // Initial data
-            if (_waitOrTimeout(pin, 50, 0) < 0) {
-                return DHTReadStatus::TIMEOUT_ERROR;
-            }
-
-            if (_waitOrTimeout(pin, 70, 1) > 28) {
-                // Bit received was a 1
-                data[i / 8] |= (1 << (7 - (i % 8)));
-            }
-        }
-
-        if (_checkCRC(data)) {
-            outResult->rawHumidity = data[0];
-            outResult->rawTemperature = data[2];
-
-            return DHTReadStatus::OK;
-        }
-
-        return DHTReadStatus::WRONG_CHECKSUM;
-*/
-        ESP_LOGI("dht", "entering critical section");
-        portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-        portENTER_CRITICAL(&mux);
-        ESP_LOGI("dht", "inside critical section");
-        portEXIT_CRITICAL(&mux);
-        ESP_LOGI("dht", "exiting critical section");
-
         if (!outResult) {
             return DHTReadStatus::BAD_ARGUMENT;
         }
