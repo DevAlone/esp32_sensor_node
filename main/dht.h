@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
+#include <mutex>
 #include <soc/rmt_reg.h>
 
 namespace sensors {

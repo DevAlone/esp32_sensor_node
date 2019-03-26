@@ -26,23 +26,33 @@ bool sendSensorsData(uint8_t srcAddr[MWIFI_ADDR_LEN], const char* sensorsData)
 
     auto status = sendHttpPost("http://" CONFIG_SERVER_DOMAIN "/api/v1/push_sensors_data", jsonData);
 
-    if (CONFIG_ALTERNATIVE_SERVER_ENABLED) {
-        jsonData = std::string("{")
-            + quoteSymbol + "username" + quoteSymbol + ": " + quoteSymbol + CONFIG_ALTERNATIVE_SERVER_USERNAME + quoteSymbol + ","
-            + quoteSymbol + "password" + quoteSymbol + ": " + quoteSymbol + CONFIG_ALTERNATIVE_SERVER_PASSWORD + quoteSymbol + ","
-            + quoteSymbol + "node_mac_address" + quoteSymbol + ": " + quoteSymbol + macBinaryToStr(srcAddr) + quoteSymbol + ","
-            + quoteSymbol + "sensors_data" + quoteSymbol + ": " + sensorsData
-            + "}";
+    return status == 200;
+}
 
-        ESP_LOGI(TAG, "sending json data: \"%s\"", jsonData.c_str());
-        auto s = sendHttpPost("http://" CONFIG_ALTERNATIVE_SERVER_DOMAIN "/api/v1/push_sensors_data", jsonData);
-        if (s == 200) {
-            status = 200;
-        }
+bool sendSensorsDataToAlternativeServer(uint8_t srcAddr[MWIFI_ADDR_LEN], const char* sensorsData)
+{
+    int status = -1;
+#if CONFIG_ALTERNATIVE_SERVER_ENABLED == true
+    auto jsonData = std::string("{")
+        + quoteSymbol + "username" + quoteSymbol + ": " + quoteSymbol + CONFIG_ALTERNATIVE_SERVER_USERNAME + quoteSymbol + ","
+        + quoteSymbol + "password" + quoteSymbol + ": " + quoteSymbol + CONFIG_ALTERNATIVE_SERVER_PASSWORD + quoteSymbol + ","
+        + quoteSymbol + "node_mac_address" + quoteSymbol + ": " + quoteSymbol + macBinaryToStr(srcAddr) + quoteSymbol + ","
+        + quoteSymbol + "sensors_data" + quoteSymbol + ": " + sensorsData
+        + "}";
+
+    ESP_LOGI(TAG, "sending json data: \"%s\"", jsonData.c_str());
+    auto s = sendHttpPost("http://" CONFIG_ALTERNATIVE_SERVER_DOMAIN "/api/v1/push_sensors_data", jsonData);
+    if (s == 200) {
+        status = 200;
     }
+#endif
 
     return status == 200;
 }
+
+static std::string dataToSend = "";
+static bool serverSent = false;
+static bool alternativeServerSent = false;
 
 void rootWriteWorker(void*)
 {
@@ -103,6 +113,23 @@ void rootWriteWorker(void*)
 #else
     ESP_LOGI(TAG, "rootWriteWorker:star");
 
+    xTaskCreate(
+        serverSenderWorker,
+        "serverSenderWorker",
+        4 * 1024,
+        nullptr,
+        CONFIG_MDF_TASK_DEFAULT_PRIOTY,
+        nullptr);
+#if CONFIG_ALTERNATIVE_SERVER_ENABLED == true
+    xTaskCreate(
+        alternativeServerSenderWorker,
+        "alternativeServerSenderWorker",
+        4 * 1024,
+        nullptr,
+        CONFIG_MDF_TASK_DEFAULT_PRIOTY,
+        nullptr);
+#endif
+
     while (true) {
         vTaskDelay(10 / portTICK_RATE_MS);
 
@@ -110,17 +137,65 @@ void rootWriteWorker(void*)
 
         esp_wifi_get_mac(ESP_IF_WIFI_STA, srcAddr);
 
-        if (sendSensorsData(srcAddr, getSensorsDataJSON().c_str())) {
-            // sent succesfull
-            onBoardLed.blink(250);
-        } else {
-            // error
-            onBoardLed.blink(1000);
-        }
+        dataToSend = getSensorsDataJSON();
+        serverSent = false;
+        alternativeServerSent = false;
 
         vTaskDelay(3000 / portTICK_RATE_MS);
     }
 #endif
+
+    // cleanup this task
+    vTaskDelete(nullptr);
+}
+
+void serverSenderWorker(void*)
+{
+    ESP_LOGI(TAG, "serverSenderWorker");
+
+    while (true) {
+        vTaskDelay(10 / portTICK_RATE_MS);
+        if (dataToSend.length() > 0 && !serverSent) {
+            uint8_t srcAddr[MWIFI_ADDR_LEN] = {};
+
+            esp_wifi_get_mac(ESP_IF_WIFI_STA, srcAddr);
+
+            if (sendSensorsData(srcAddr, dataToSend.c_str())) {
+                // sent succesfull
+                onBoardLed.blink(250);
+            } else {
+                // error
+                onBoardLed.blink(1000);
+            }
+            serverSent = true;
+        }
+    }
+
+    // cleanup this task
+    vTaskDelete(nullptr);
+}
+
+void alternativeServerSenderWorker(void*)
+{
+    ESP_LOGI(TAG, "alternativeServerSenderWorker");
+
+    while (true) {
+        vTaskDelay(10 / portTICK_RATE_MS);
+        if (dataToSend.length() > 0 && !alternativeServerSent) {
+            uint8_t srcAddr[MWIFI_ADDR_LEN] = {};
+
+            esp_wifi_get_mac(ESP_IF_WIFI_STA, srcAddr);
+
+            if (sendSensorsDataToAlternativeServer(srcAddr, dataToSend.c_str())) {
+                // sent succesfull
+                onBoardLed.blink(250);
+            } else {
+                // error
+                onBoardLed.blink(1000);
+            }
+            alternativeServerSent = true;
+        }
+    }
 
     // cleanup this task
     vTaskDelete(nullptr);

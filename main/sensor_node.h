@@ -1,9 +1,9 @@
 #pragma once
 
 void rootWriteWorker(void*);
-
+void serverSenderWorker(void*);
+void alternativeServerSenderWorker(void*);
 void meshNodeReadWorker(void*);
-
 void meshNodeWriteWorker(void*);
 
 /**
