@@ -222,6 +222,7 @@ void app_main()
     nvs_flash_init();
     wifi_init();
 
+    /*
     TimerHandle_t timer = xTimerCreate(
         "printSystemInfo",
         10000 / portTICK_RATE_MS,
@@ -229,5 +230,6 @@ void app_main()
         nullptr,
         printSystemInfo);
     xTimerStart(timer, 0);
+    */
 }
 #endif
